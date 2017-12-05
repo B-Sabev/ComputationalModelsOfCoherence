@@ -64,7 +64,7 @@ def subsets(nodes):
 # In[34]:
 
 
-n = 5
+n = int(input("Enter seed: "))
 
 W = initW(n)          # initialize edges
 nodes = np.arange(n)  # init nodes
