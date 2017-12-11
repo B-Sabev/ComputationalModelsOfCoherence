@@ -1,15 +1,16 @@
 
 # coding: utf-8
 
-# In[1]:
+# In[6]:
 
 
 import numpy as np
 import itertools
 import matplotlib.pyplot as plt
+import time
 
 
-# In[2]:
+# In[7]:
 
 
 class CoherenceGraph(object):
@@ -18,30 +19,31 @@ class CoherenceGraph(object):
     Accepts a list of nodes (s) that are accepted to be true from the start
     Can compute its coherence (W), which is a weighted sum of satisfied constrains
     """
-    def __init__(self,n,s=[], seed=89):
+    def __init__(self,n,observed=[], seed=89, inhibitory_fraction=0.5):
         self.n = n               # total number of nodes
         self.v = np.zeros((n))   # truth assignment of all nodes 1 for True, -1 for False
-        self.s = [e for e in s if e < self.n] # list of indecies of nodes that are set to be true
-        self.c = self.initConnections(seed)   # connections between nodes
+        self.observed = [e for e in observed if e < self.n] # list of indecies of nodes that are set to be true
+        self.c = self.initConnections(seed, inhibitory_fraction)   # connections between nodes
         self.W = None
             
-    def initConnections(self, seed):
+    def initConnections(self, seed, inhibitory_fraction):
         """
         Randomly select from positive or negative constrains, weighted between -1,1
-        All excitatory connections are set to 0.4 (except for special elements s to 0.5 )
+        All excitatory connections are set to 0.4 (except for special elements s to 0.5)
         All inhibitory connections to -0.6
         """
-        np.random.seed(seed)
-        c = np.random.rand(self.n, self.n) * 2 - 1  # init with random between -1, 1
+        np.random.seed(seed)    
+        # initialize the weights between (0,1) for inh_frac=0, (-0.5,0.5) for inh_frac=0.5 and (-1,0) for inh_frac=1
+        c = np.random.rand(self.n, self.n) - inhibitory_fraction
         for i in range(c.shape[0]):
             for j in range(c.shape[1]):
-                c[i][j] = c[j][i] # make symmetric
+                c[i][j] = c[j][i]  # make symmetric
         c = np.where(c>0, 0.4, c)  # set all excitatory connections to 0.4
-        c = np.where(c<0,-0.6, c)   # set all inhibitory connections to -0.6
-        c[self.s,:] = 0.5       # Set all d to s connections to 0.5 
-        c[:,self.s] = 0.5
+        c = np.where(c<0,-0.6, c)  # set all inhibitory connections to -0.6
+        c[self.observed,:] = 0.5   # Set all d to s connections to 0.5 
+        c[:,self.observed] = 0.5
         diag = np.arange(self.n)
-        c[diag,diag] = 0                   # Remove connections between d and d
+        c[diag,diag] = 0           # Remove self connections
         return c
         
     def computeW(self):
@@ -49,19 +51,24 @@ class CoherenceGraph(object):
         Compute the coherence(W/W*) for one assignment of nodes
         """
         E = np.where(self.v > 0, 1, -1)
-        W = np.sum(self.c * np.dot(E.reshape(-1,1), E.reshape(1,-1)))   # W = C * E * E
-        self.W = W / np.sum(self.c)
-        return self.W  # W / W* 
+        # theshold the connections to only -1,1
+        binary_weights = np.where(self.c > 0, 1, self.c)
+        binary_weights = np.where(binary_weights < 0, -1, binary_weights)
+        W = np.sum(binary_weights * np.dot(E.reshape(-1,1), E.reshape(1,-1)))   # W = C * E * E
+        self.W = W
+        if np.sum(binary_weights) != 0:
+            self.W = self.W / np.sum(binary_weights) # W / W*
+        return self.W   
         
     def setV(self, v):
         self.v = v
         
-    def setS(self, s):
-        self.s = [e for e in s if e < self.n] # set only valid elements for s
+    def setObserved(self, observed):
+        self.observed = [e for e in observed if e < self.n] # set only valid elements for s
         
 
 
-# In[3]:
+# In[8]:
 
 
 class ExhaustiveSearch(object):
@@ -99,7 +106,7 @@ class ExhaustiveSearch(object):
         Remove subsets that are inconsistent with what we know to be true (s)
         """
         subs = self.allSubsets()
-        for s in self.graph.s:
+        for s in self.graph.observed:
             subs = subs[subs[:,s] == 1,] # remove subsets where values in s are not True
         return subs
     
@@ -124,7 +131,7 @@ class ExhaustiveSearch(object):
             
 
 
-# In[4]:
+# In[9]:
 
 
 class ConnectionistModel(object):
@@ -147,7 +154,7 @@ class ConnectionistModel(object):
         
     def initUnits(self):
         v_init = np.repeat(self.initState, self.graph.n) # make array lenght n filled with unit_value
-        v_init[self.graph.s] = 1                     # set the special elements of s to true
+        v_init[self.graph.observed] = 1                     # set the special elements of s to true
         self.units = v_init
         
     def updateGraph(self):
@@ -156,18 +163,25 @@ class ConnectionistModel(object):
         """
         self.initUnits()
         v = self.units.copy()
-        for _ in range(self.numCycles): # for total number of cycles
+        v_old = v.copy() * 100 # initial value so it will skip the first break
+        for step in range(self.numCycles): # for total number of cycles
+            # keep the old version of v for paralel updating
+            # if v_old and v every element differnce < 0.001, then stop
+            if np.all(np.abs(v_old - v) < 0.001):
+                break
+            # assign to v_old v from the previous step
+            v_old = v.copy()
             for i in range(self.graph.n): # for every unit in the graph
-                if i not in self.graph.s: # if the unit is not a special fixed value s
-                    net = np.dot(v, self.graph.c[i]) # compute total flow to the unit
+                if i not in self.graph.observed: # if the unit is not a special fixed value s
+                    net = np.dot(v_old, self.graph.c[i]) # compute total flow to the unit
                     if net > 0:
-                        gradient = net*(1-v[i])
+                        gradient = net*(self.min_max[1]-v_old[i])
                     else:
-                        gradient = net*(v[i]-(-1))
-                    v[i] = v[i]*(1-self.decay) + gradient
+                        gradient = net*(v_old[i]-self.min_max[0])
+                    v[i] = v_old[i]*(1-self.decay) + gradient
             # should this be after every unit update, or after the whole graph updates ??
-            v = np.where(v>1, 1, v)
-            v = np.where(v<-1,-1,v)
+            v = np.where(v>1, self.min_max[1], v)
+            v = np.where(v<-1,self.min_max[0],v)
         self.units = v
         
     def getSolution(self):
@@ -179,27 +193,59 @@ class ConnectionistModel(object):
         
 
 
-# In[5]:
+# In[10]:
 
 
 """
 Test and compare the 2 algorithms
-
-TODO - decide on measures for comparison
 """
+# Simple Matching Coefficient 
+def SMC(E1, E2):
+    #Compute fraction of shared elements for 2 ndarrays
+    return np.sum(E1 == E2) / E1.shape[0]
 
-for n in range(5, 15):  # for different number of nodes        
-    for seed in range(45,700, 100): # for different seeds
+
+"""
+For the TA, if you want to modify this...
+
+NUM_NODES - all different number of nodes on the graph to test with, don't run with more than 18 - takes minutes
+INHIBITORY_FRACTIONS - Fracions of constrains set to negative/inhibitory, 
+                       0.0 - all constrains are positive, 0.5 - equal number of positive and negative, 1.0 - all constrains are negative
+OBSERVED - set of index of nodes that are set to be true 
+"""
+NUM_NODES = range(3, 19, 3)   
+INHIBITORY_FRACTIONS = [0.0, 0.25, 0.5, 0.75, 1.]  
+OBSERVED = [1,2]
+
+# For data collection
+data_size = (len(NUM_NODES), len(INHIBITORY_FRACTIONS))
+data = {
+    'node_similarity' : np.zeros(data_size), # Simple matching coefficient between the truth assignments of the 2 algorithms
+    'coherence' : np.zeros(data_size), # Coherence for the exhaustive search over all runs
+    'harmony' : np.zeros(data_size), # Harmony from the connectionist model
+    'exhTimes' : np.zeros(data_size), # Runtime for the exhausitve search
+    'conTimes' : np.zeros(data_size) # Runtime for connectionist model
+}
+
+
+for i,n in enumerate(NUM_NODES):  # for different number of nodes        
+    for j,inhib_frac in enumerate(INHIBITORY_FRACTIONS): # for different fraction of inhibitory links / negative constrains
         
         # Create a graph with n number of nodes, where the s nodes are always true, with random seed for constrains seed
-        G = CoherenceGraph(n=n, s=[1,4], seed=seed)
-
+        G = CoherenceGraph(n=n,                            # number of nodes
+                           observed=OBSERVED,              # observed elements 
+                           seed=89,                        # random seed for the constrains 
+                           inhibitory_fraction=inhib_frac) # relative fraction of inhibitory links / negative constrains
+        
+        start = time.time()
         # Exhaustive search
         ExCoh = ExhaustiveSearch(G) # create exhausive seach with the graph
         ExCoh.search()              # compute W for all possible subsets
         Wmax, Emax = ExCoh.getOptimalSolution() # get the max W and the truth assigments that achieves it
-        print("{} {}".format(Wmax, Emax))
-
+        data['exhTimes'][i][j] = time.time()-start
+        data['coherence'][i][j] = Wmax
+        
+        start = time.time()
         # Connectionist model
         ConCoh = ConnectionistModel(G,               
                                     initState=0.1,   
@@ -207,7 +253,56 @@ for n in range(5, 15):  # for different number of nodes
                                     min_max=(-1,1),  
                                     decay=0.05) 
         ConCoh.updateGraph()
-        Wcon, Econ = ConCoh.getSolution() # get the final state of the 
-        print("{} {}".format(Wcon, Econ))
-        print("")
+        harmony, Econ = ConCoh.getSolution() # get the final state of the 
+        data['conTimes'][i][j] = time.time()-start
+        data['harmony'][i][j] = harmony
+        
+        # Track truth assignment difference and coherence / harmony fraction
+        data['node_similarity'][i][j] = SMC(Emax, Econ)
+        
+        
+
+
+# In[25]:
+
+
+# Plot simple matching coefficient between the truth assignments of the different algorithms
+for i, inh in enumerate(INHIBITORY_FRACTIONS):
+    plt.plot(NUM_NODES,data['node_similarity'][:,i], '-o', color='b')
+    plt.ylim([0.5,1.1])
+    plt.title("Simple Matching coefficient of the truth assignments for  {} negative constrains".format(inh))
+    plt.xticks(list(NUM_NODES))
+    plt.xlabel("number of nodes")
+    plt.ylabel("node similarity")
+    plt.savefig('SMC{}.png'.format(inh))
+    plt.show()
+
+
+# In[18]:
+
+
+# Plot a comparison of the runtimes of both algorithms
+exhTimesLine = plt.plot(NUM_NODES, np.mean(data['exhTimes'], axis=1), color='r', label='Exhaustive')
+conTimesLine = plt.plot(NUM_NODES, np.mean(data['conTimes'], axis=1), color='g', label='Connectionist')
+plt.xlabel("Number of nodes")
+plt.ylabel("Time in seconds")
+plt.title("Runtime as function of number of node in the graph")
+plt.legend()
+plt.savefig("RuntimeComparison.png")
+plt.show()
+
+
+# In[24]:
+
+
+# Compare coherence and harmony for each number of nodes and inhibitory fractions
+for i, inh in enumerate(INHIBITORY_FRACTIONS):
+    plt.plot(NUM_NODES,data['coherence'][:,i], '-o', color='r', label='coherence')
+    plt.plot(NUM_NODES,data['harmony'][:,i], '-.o', color='g', label='harmony')
+    plt.title("Coherence vs harmony for {} negative constrains".format(inh))
+    plt.legend()
+    plt.xlabel("number of nodes")
+    plt.ylabel("Cohrence and harmony")
+    plt.savefig('NodeSimilarityFor{}.png'.format(inh))
+    plt.show()
 
