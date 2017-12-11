@@ -1,7 +1,7 @@
 
 # coding: utf-8
 
-# In[6]:
+# In[31]:
 
 
 import numpy as np
@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import time
 
 
-# In[7]:
+# In[32]:
 
 
 class CoherenceGraph(object):
@@ -68,7 +68,7 @@ class CoherenceGraph(object):
         
 
 
-# In[8]:
+# In[33]:
 
 
 class ExhaustiveSearch(object):
@@ -131,7 +131,7 @@ class ExhaustiveSearch(object):
             
 
 
-# In[9]:
+# In[34]:
 
 
 class ConnectionistModel(object):
@@ -193,7 +193,7 @@ class ConnectionistModel(object):
         
 
 
-# In[10]:
+# In[36]:
 
 
 """
@@ -263,7 +263,7 @@ for i,n in enumerate(NUM_NODES):  # for different number of nodes
         
 
 
-# In[25]:
+# In[37]:
 
 
 # Plot simple matching coefficient between the truth assignments of the different algorithms
@@ -278,21 +278,22 @@ for i, inh in enumerate(INHIBITORY_FRACTIONS):
     plt.show()
 
 
-# In[18]:
+# In[38]:
 
 
 # Plot a comparison of the runtimes of both algorithms
-exhTimesLine = plt.plot(NUM_NODES, np.mean(data['exhTimes'], axis=1), color='r', label='Exhaustive')
-conTimesLine = plt.plot(NUM_NODES, np.mean(data['conTimes'], axis=1), color='g', label='Connectionist')
+exhTimesLine = plt.plot(NUM_NODES, np.mean(data['exhTimes'], axis=1), '-o', color='r', label='Exhaustive')
+conTimesLine = plt.plot(NUM_NODES, np.mean(data['conTimes'], axis=1), '-o', color='g', label='Connectionist')
 plt.xlabel("Number of nodes")
 plt.ylabel("Time in seconds")
 plt.title("Runtime as function of number of node in the graph")
+plt.xticks(list(NUM_NODES))
 plt.legend()
 plt.savefig("RuntimeComparison.png")
 plt.show()
 
 
-# In[24]:
+# In[39]:
 
 
 # Compare coherence and harmony for each number of nodes and inhibitory fractions
@@ -302,6 +303,7 @@ for i, inh in enumerate(INHIBITORY_FRACTIONS):
     plt.title("Coherence vs harmony for {} negative constrains".format(inh))
     plt.legend()
     plt.xlabel("number of nodes")
+    plt.xticks(list(NUM_NODES))
     plt.ylabel("Cohrence and harmony")
     plt.savefig('NodeSimilarityFor{}.png'.format(inh))
     plt.show()
